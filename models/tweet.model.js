@@ -3,7 +3,12 @@ var Schema = mongoose.Schema;
 
 var tweetSchema = Schema({
     text:String,
-    dateTweet:Date,
+    dateTweet:String,
+    commentTweet:String,
+    sourceInformation:String, 
+    likes: [],
+    replies:[],
+    retweets:[],
     user: [{type: Schema.Types.ObjectId, ref: 'user'}]
 });
 
