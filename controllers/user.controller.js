@@ -44,11 +44,12 @@ function commands(req, res){
                     tweet.text = saveText(text, 1);
                     tweet.dateTweet = date;
                     tweet.user = req.user.sub;
+                    tweet.retweet = null;
                     tweet.save((err, saveTweet)=>{
                         if(err){
                             res.status(500).send({message: 'Error desconocido en el servidor al publicar tweet'});
                         } else if(saveTweet){
-                            res.status(200).send({message: 'Se ha publicado el tweet', saveTweet});
+                            res.status(200).send({message: 'Se ha publicado el tweet',ID: saveTweet._id, text: saveTweet.text, date: saveTweet.dateTweet});
                         } else {
                             res.status(404).send({message: 'No se obtuvieron los datos necesarios'});
                         }
@@ -71,13 +72,17 @@ function commands(req, res){
                         res.status(500).send({message: 'Error desconocido en el servidor al buscar tweet'});
                     } else if(findTweet){
                         if(findTweet.user == req.user.sub){
-                            Tweet.findByIdAndRemove(text[1], (err, findTweetAndDelete)=>{
+                            Tweet.findByIdAndRemove(findTweet._id, (err, findTweetAndDelete)=>{
                                 if(err){
                                     res.status(500).send({message: 'Error desconocido en el servidor al eliminar tweet'});
                                 } else if(findTweetAndDelete){
-                                    res.status(200).send({message: 'Se ha eliminado el tweet correctamente'});
-                                } else{
-                                    res.status(404).send({message: 'No se obtuvieron los datos necesarios'});
+                                    Tweet.remove({retweet: findTweet._id}, (err, tweetsDeleted)=>{
+                                        if(err){
+                                            res.status(500).send({message: 'Error desconocido en el servidor al eliminar tweet'});
+                                        } else if(tweetsDeleted){
+                                            res.status(200).send({message: 'El tweet se ha eliminado con éxito'});
+                                        }
+                                    });
                                 }
                             });
                         } else{
@@ -99,9 +104,9 @@ function commands(req, res){
                     } else if(findTweet){
                         if(findTweet.user == req.user.sub){
                             if(saveText(text, 2) != "" && saveText(text, 2).length <= 150){
-                                Tweet.findOne({_id: findTweet._id, sourceInformation: / /}, (err, findDocument)=>{
+                                Tweet.findOne({_id: text[1], retweet: {$size: 1}}, (err, findDocument)=>{
                                     if(err){
-                                        res.status(500).send({message: 'Error desconocido en el servidor al buscar documento'});
+                                        res.status(500).send({message: 'Error desconocido en el servidor al buscar documento', err});
                                     } else if(findDocument){
                                             Tweet.findByIdAndUpdate(text[1], {commentTweet: saveText(text, 2)}, {new: true}, (err, updateTweet)=>{
                                                 if(err){
@@ -146,9 +151,10 @@ function commands(req, res){
             if(req.headers.authorization){
                 if(text.length == 1){   
                     Tweet.aggregate([{$project:{'replies': {$size: '$replies'}, 'likes':{$size:'$likes'}, 'retweets':{$size: '$retweets'},
-                                      'text': true, 'dateTweet': true, 'user':true, 'commentTweet': true, 'sourceInformation': true}}], (err, findTweets)=>{
+                                   'text': true, 'dateTweet': true, 'user':true, 'commentTweet': true, 'retweet':{$ifNull:["$retweet", "$retweet: false"]}}}], 
+                                   (err, findTweets)=>{
                         if(err){
-                            res.status(500).send({message: 'Error desconocido en el servidor al realizar la consulta'});
+                            res.status(500).send({message: 'Error desconocido en el servidor al realizar la consulta', err});
                         } else if(findTweets){
                             if(findTweets.length == 0){
                                 res.status(200).send({message: 'No hay tweets en la base de datos'});                        
@@ -165,7 +171,8 @@ function commands(req, res){
                             res.status(500).send({message: 'Error desconocido en el servidor al buscar usuario'});
                         } else if(findUser){
                             Tweet.aggregate([{$match:{user: findUser._id}}, {$project:{'replies': {$size: '$replies'}, 'likes':{$size:'$likes'}, 'retweets':{$size: '$retweets'},
-                            'text': true, 'dateTweet': true, 'user':true, 'commentTweet': true, 'sourceInformation': true}}], (err, findTweets)=>{
+                                              'text': true, 'dateTweet': true, 'user':true, 'commentTweet': true, 'retweet': {$ifNull:["$retweet", "$retweet: false"]}}}], 
+                                              (err, findTweets)=>{
                                 if(err){
                                     res.status(500).send({message: 'Error desconocido en el servidor al realizar la consulta'});
                                 } else if(findTweets){
@@ -179,7 +186,7 @@ function commands(req, res){
                                 }
                             });
                         } else{
-                            res.status(404).send({message: 'No existe el usuario ' +  text[1]});
+                            res.status(404).send({message: 'El usuario ' +  text[1] + ' no existe en la base de datos'});
                         }
                     });
                 } else if(text.length == 2 && text[1].length == 24){
@@ -191,7 +198,7 @@ function commands(req, res){
                         } else{
                             res.status(404).send({mesage: 'El Tweet que esta buscando no existe en la base de datos'});
                         }
-                    }).populate('user');
+                    }).populate('user').populate('retweet');
                 }else{
                     res.status(404).send({message: 'Error en la sintaxis del comando'});
                 }
@@ -215,9 +222,7 @@ function commands(req, res){
                                             if(err){
                                                 res.status(500).send({message: 'Error desconocido en el servidor al realizar acción'});
                                             } else if(tweetUpdated){
-                                                res.status(200).send({message: 'La operación ha sido exitosa!, le ha gustado el tweet:',
-                                                                    id: tweetUpdated._id, user: tweetUpdated.user, dateTweet: tweetUpdated.dateTweet, tweet: tweetUpdated.text,
-                                                                    likes: tweetUpdated.likes.length, replies: tweetUpdated.replies.length, retweets: tweetUpdated.retweets.length});
+                                                res.status(200).send({message: 'La operación ha sido exitosa!, ha dejado su like al tweet de ' + findUser.username})
                                             } else{
                                                 res.status(500).send({message: 'No se ha podido realizar la acción, intente más tarde'});
                                             }
@@ -251,9 +256,7 @@ function commands(req, res){
                                 if(err){
                                     res.status(500).send({message: 'Error desconocido en el servidor al realizar acción'});
                                 } else if(tweetUpdated){
-                                    res.status(200).send({message: 'La operación ha sido exitosa!, ha dejado de reaccionar al tweet:',
-                                                          id: tweetUpdated._id, user: tweetUpdated.user, dateTweet: tweetUpdated.dateTweet, tweet: tweetUpdated.text,
-                                                        likes: tweetUpdated.likes.length, replies: tweetUpdated.replies.length, retweets: tweetUpdated.retweets.length});
+                                    res.status(200).send({message: 'La operación ha sido exitosa!, ha dejado de reaccionar al tweet seleccionado'});
                                 } else{
                                     res.status(500).send({message: 'No se ha podido realizar la acción correctamente, intente más tarde'});
                                 }
@@ -279,11 +282,9 @@ function commands(req, res){
                             var repl = req.user.username + ": " + saveText(text, 2);
                             Tweet.findByIdAndUpdate(text[1], {$push:{replies: repl}}, {new: true}, (err, tweetUpdated)=>{
                                 if(err){
-                                    res.status(500).send({message: 'Error desconocido en el servidor al responder tweet', err});
+                                    res.status(500).send({message: 'Error desconocido en el servidor al responder tweet'});
                                 } else if(tweetUpdated){
-                                    res.status(200).send({message: 'La operación ha sido exitosa', id: tweetUpdated._id, user: tweetUpdated.user,
-                                                        dateTweet: tweetUpdated.dateTweet,text: tweetUpdated.text, likes: tweetUpdated.likes.length,
-                                                        replies: tweetUpdated.replies});
+                                    res.status(200).send({message: 'La operación ha sido exitosa', replies: tweetUpdated.replies});
                                 } else{
                                     res.status(404).send({message: 'No se ha podido completar la acción'});
                                 }
@@ -292,7 +293,7 @@ function commands(req, res){
                             if(saveText(text, 2).length > 150){
                                 res.status(403).send({message: 'Su respuesta excede el numero de caracteres permitidos'});
                             } else{
-                                res.status(403).send({message: 'Ingrese el texto de su respuesta correctamente por favor'});
+                                res.status(403).send({message: 'Ingresé como mínimo un solo caracter'});
                             }
                         }
                     } else{
@@ -310,61 +311,42 @@ function commands(req, res){
                         res.status(500).send({message: 'Error desconocido en el servidor al buscar tweet'});
                     } else if(findTweet){
                         if(searcher(findTweet.retweets) == false){
-                            User.findById(findTweet.user, (err, findUser)=>{
+                            tweet.user = req.user.sub;
+                            tweet.retweet = findTweet._id;
+                            tweet.commentTweet = saveText(text, 2);
+                            tweet.save((err, saveTweet)=>{
                                 if(err){
-                                    res.status(500).send({mesage: 'Error desconocido en el servidor al buscar usuario'});
-                                } else if(findUser){
-                                    tweet.text = findTweet.text;
-                                    tweet.dateTweet = date;
-                                    tweet.user = req.user.sub;
-                                    tweet.commentTweet = saveText(text, 2);
-                                    tweet.sourceInformation = findUser.username + ' ' + findTweet.dateTweet;
-
-                                    tweet.save((err, saveTweet)=>{
+                                    res.status(500).send({message: 'Error desconocido en el servidor al guardar retweet'});
+                                } else if(saveTweet){
+                                    Tweet.findByIdAndUpdate(findTweet._id, {$push:{retweets: req.user.username}}, {new: true}, (err, tweetUpdated)=>{
                                         if(err){
-                                            res.status(500).send({mesage: 'Error desconocido en el servidor al guardar tweet'});
-                                        } else if(saveTweet){
-                                            Tweet.findByIdAndUpdate(findTweet._id, {$push:{retweets: req.user.username}}, {new:true}, (err, tweetUpdated)=>{
-                                                if(err){
-                                                    res.status(500).send({mesage: 'Error desconocido en el servidor al actualizar tweet'});
-                                                } else if(tweetUpdated){
-                                                    res.status(200).send({mesage: 'Ha compartido el tweet de ' + findUser.username, Tweet: saveTweet});
-                                                } else{
-                                                    res.status(500).send({mesage: 'No se ha podido completar la operación, intente mas tarde'});
-                                                }
-                                            });
-                                        } else {
-                                            res.status(500).send({mesage: 'No se ha podido completar la operación, intente mas tarde'});
+                                            res.status(500).send({message: 'Error desconocido en el servidor al guardar retweet'});
+                                        } else if(tweetUpdated){
+                                            res.status(200).send({message: 'Se ha compartido el tweet', saveTweet});
+                                        } else{
+                                            res.status(500).send({message: 'La accion no se ha podido finalizar, intente más tarde'});
                                         }
                                     });
                                 } else{
-                                    res.status(404).send({mesage: 'No se ha podido encontrar al usuario'});
+                                    res.status(500).send({message: 'La accion no se ha podido finalizar, intente más tarde'});
                                 }
                             });
                         } else{
-                            User.findById(findTweet.user, (err, findUser)=>{
+                            Tweet.findByIdAndUpdate(findTweet._id, {$pull:{retweets: req.user.username}}, {new: true}, (err, tweetUpdated)=>{
                                 if(err){
-                                    res.status(500).send({mesage: 'Error desconocido en el servidor al buscar usuario'});
-                                } else if(findUser){
-                                    Tweet.findOneAndRemove({sourceInformation: findUser.username + ' ' + findTweet.dateTweet, user: req.user.sub}, (err, findTweetAndDelete)=>{
+                                    res.status(500).send({message: 'Error desconocido en el servidor al actuar tweet'});
+                                } else if(tweetUpdated){
+                                    Tweet.findOneAndDelete({retweet: findTweet._id, user: req.user.sub}, (err, tweetDeleted)=>{
                                         if(err){
                                             res.status(500).send({message: 'Error desconocido en el servidor al eliminar tweet'});
-                                        } else if(findTweetAndDelete){
-                                            Tweet.findByIdAndUpdate(findTweet._id, {$pull:{retweets: req.user.username}}, {new:true}, (err, tweetUpdated)=>{
-                                                if(err){
-                                                    res.status(500).send({mesage: 'Error desconocido en el servidor al actualizar tweet'});
-                                                } else if(tweetUpdated){
-                                                    res.status(200).send({mesage: 'Se ha eliminado el tweet correctamente'});
-                                                } else{
-                                                    res.status(500).send({mesage: 'No se ha podido completar la operación, intente mas tarde'});
-                                                }
-                                            });
+                                        } else if(tweetDeleted){
+                                            res.status(200).send({message: 'El retweet se ha eliminado con éxito'});
                                         } else{
-                                            res.status(404).send({message: 'No se obtuvieron los datos necesarios'});
+                                            res.status(500).send({message: 'La accion no se ha podido finalizar, intente más tarde'});
                                         }
                                     });
                                 } else{
-                                    res.status(404).send({mesage: 'No se ha podido encontrar al usuario'});
+                                    res.status(500).send({message: 'La accion no se ha podido finalizar, intente más tarde'});
                                 }
                             });
                         }
